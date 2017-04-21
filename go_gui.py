@@ -9,12 +9,22 @@ import colorsys
 import cairo
 import Image
 
+# FIXME: notification text too large sometimes
+# FIXME: captured stone colors may be misleading
+# TODO: less obtrusive pass buttons
+# TODO: better end-game interface
+# TODO: option to show mouse cursor
+# TODO: show a grid with a little star instead of a flat square for board size/reset button
+# TODO: add something to counteract the illusion of holes in the star points
+# TODO: add SGF file generation, maybe loading and browsing
+# TODO: add external GO AI integration (gnugo, etc)
+
 
 MUTE = False
 
 LEFT = 1
 
-bgcolor = 0, 0, 0
+bgcolor = 0, 0, 1
 blueval = 0
 bluedir = 1
 x = y = 0
