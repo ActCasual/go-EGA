@@ -9,12 +9,17 @@ import colorsys
 import cairo
 import Image
 
-# FIXME: notification text too large sometimes
-# FIXME: captured stone colors may be misleading
+from latency_timer import LatencyTimer
+from cairo_context import get_cairo_context
+from notifier import Notifier
+
+
+#[x] - FIXME: captured stone colors may be misleading
 # TODO: less obtrusive pass buttons
 # TODO: better end-game interface
 # TODO: option to show mouse cursor
 # TODO: show a grid with a little star instead of a flat square for board size/reset button
+# TODO: add a separate button for changing board colors
 # TODO: add something to counteract the illusion of holes in the star points
 # TODO: add SGF file generation, maybe loading and browsing
 # TODO: add external GO AI integration (gnugo, etc)
@@ -24,7 +29,7 @@ MUTE = False
 
 LEFT = 1
 
-bgcolor = 0, 0, 1
+bgcolor = 0, 0, 0
 blueval = 0
 bluedir = 1
 x = y = 0
@@ -63,9 +68,9 @@ print str(info_object)
 # exit()
 
 full_res = (info_object.current_w, info_object.current_h)
-# window_res = (full_res[0]/2, full_res[1]/2)
+window_res = (int(round(full_res[0]*0.75)), int(round(full_res[1]*0.75)))
 # window_res = (600,600)
-window_res = (800, 400)
+#window_res = (800, 400)
 #window_res = (1000, 600) # better usually
 fullscreen = False
 current_res = window_res
@@ -86,75 +91,11 @@ screen = pygame.display.set_mode(window_res)
 
 mouse_down = False
 
-from time import clock
-class LatencyTimer:
-    thresh = 0.1 # required delay between plays
-                 # - seems like timer.clock() might not be in seconds
-    last_time = -1
-
-    def __init__(self, thresh=None):
-        if thresh is not None:
-            self.thresh = thresh
-        self.last_time = clock()
-
-    def reset(self):
-        #print "Resetting timer"
-        self.last_time = clock()
-
-    def check(self):
-        current_time = clock()
-        diff = current_time - self.last_time
-        #print "Time since last timer reset: %f"%diff
-        if diff > self.thresh:
-            return True
-        else:
-            return False
 
 latency_timer = LatencyTimer()
 
 
-class Notifier:
-    thresh = 0.2
 
-    def __init__(self):
-        self.timer = LatencyTimer(4)
-        self.text = ""
-
-    def update(self, **kwargs):
-        print "updating notifier"
-        # set a negative thresh to indicate no threshold to disappearance
-        if "text" in kwargs:
-            self.text = kwargs["text"]
-            print "with text \"%s\""%self.text
-        if "thresh" in kwargs:
-            self.thresh = kwargs["thresh"]
-        else:
-            self.thresh = 0.5
-        self.timer = LatencyTimer(self.thresh)
-
-    def render(self):
-        # TODO: render same message rotated for each player
-        # and out of the way of the board
-
-        #print "Checking notifier timer with thresh %f"%self.timer.thresh
-        if self.thresh<0 or not self.timer.check():
-            #print "Attempting to render notification"
-            # calc rect coords in window coords
-            w = current_res[0]
-            h = current_res[1]
-            if w > h:
-                # landscape mode
-                c = (w/6.0, 10)
-            else:
-                # portrait mode
-                c = (w / 2.0, (h - w) / 2.0)
-
-            # myfont = pygame.font.SysFont("monospace", 24)
-            myfont = pygame.font.SysFont("Ubuntu", 48)
-            # render text
-            label = myfont.render(self.text, True, (100,180,255))
-            #label = pygame.transform.rotate(label, 90)
-            screen.blit(label, c)
 
 notifier = Notifier()
 
@@ -387,18 +328,19 @@ class Board:
                                                 self.grid_color[1],
                                                 self.grid_color[2])
 
-    def init_cairo_surface(self):
-        w, h = screen.get_size()
-        # Get a reference to the memory block storing the pixel data.
-        pixels = pygame.surfarray.pixels2d(screen)
+    #def init_cairo_surface(self):
+    #    w, h = screen.get_size()
+    #    # Get a reference to the memory block storing the pixel data.
+    #    pixels = pygame.surfarray.pixels2d(screen)
+    #
+    #    # Set up a Cairo surface using the same memory block and the same pixel
+    #    # format (Cairo's RGB24 format means that the pixels are stored as
+    #    # 0x00rrggbb; i.e. only 24 bits are used and the upper 16 are 0).
+    #    self.cairo_surface = cairo.ImageSurface.create_for_data(
+    #        pixels.data, cairo.FORMAT_RGB24, w, h)
+    #
+    #    self.prerender_cairo()  # eventually delete the above, shouldn't be needed
 
-        # Set up a Cairo surface using the same memory block and the same pixel
-        # format (Cairo's RGB24 format means that the pixels are stored as
-        # 0x00rrggbb; i.e. only 24 bits are used and the upper 16 are 0).
-        self.cairo_surface = cairo.ImageSurface.create_for_data(
-            pixels.data, cairo.FORMAT_RGB24, w, h)
-
-        self.prerender_cairo()  # eventually delete the above, shouldn't be needed
 
     def prerender_stone(self, color, radius, outline_width=0, use_gradient=True):
 
@@ -905,28 +847,50 @@ class Board:
                     self.render_territory_marker((i, j), t)
 
     def render_score(self):
-        # TODO: properly rotate and center text
         self.score()  # not sure if this call is more natural somewhere else
-        # calc rect coords in window coords
-        w = current_res[0]
-        h = current_res[1]
-        o = 6
-        if w > h:
-            # landscape mode
-            c1 = ((w - h) / 2.0, h / 2.0)
-            c2 = (h + (w - h) / 2.0 + ((w - h) / 2.0) * 0.0, h / 2.0)
-        else:
-            # portrait mode
-            c1 = (w / 2.0, (h - w) / 2.0)
-            c2 = (w / 2.0, w + (h - w) / 2.0 + ((h - w) / 2.0) * 0.0)
+        score1 = "%0.1f" % self.final_scores[1]
+        score2 = "%0.1f" % self.final_scores[2]
 
-        # myfont = pygame.font.SysFont("monospace", 24)
-        myfont = pygame.font.Font(None, 64)
-        # render text
-        label = myfont.render(" %0.1f " % self.final_scores[1], 1, (128, 128, 128), (0, 0, 0))
-        screen.blit(label, c1)
-        label = myfont.render(" %0.1f " % self.final_scores[2], 1, (128, 128, 128), (0, 0, 0))
-        screen.blit(label, c2)
+        context, h,w = get_cairo_context()
+
+        # if w > h:
+        #     # landscape mode
+        #     c1 = ((w - h) / 2.0, h / 2.0)
+        #     c2 = (h + (w - h) / 2.0 + ((w - h) / 2.0) * 0.0, h / 2.0)
+        # else:
+        #     # portrait mode
+        #     c1 = (w / 2.0, (h - w) / 2.0)
+        #     c2 = (w / 2.0, w + (h - w) / 2.0 + ((h - w) / 2.0) * 0.0)
+
+        context.select_font_face("Ubuntu", cairo.FONT_SLANT_NORMAL,
+                                 cairo.FONT_WEIGHT_BOLD)
+        font_height_scale=0.08
+
+        context.set_font_size(h*font_height_scale)
+
+        context.translate(w/2,h/2)
+
+        context.save()
+        context.translate(0,0)
+        context.rotate(np.pi*0.5)
+
+        (x, y, width, height, dx, dy) = context.text_extents(score1)
+        context.move_to(-width/2, h*0.70-height/2)
+        context.set_source_rgb(*self.player1_fillcolor)
+        context.show_text(score1)
+
+        context.restore()
+
+        context.save()
+        context.translate(0,0)
+        context.rotate(np.pi*1.5)
+
+        (x, y, width, height, dx, dy) = context.text_extents(score2)
+
+        context.set_source_rgb(*self.player2_fillcolor)
+        context.move_to(-width/2, h*0.70-height/2)
+        context.show_text(score2)
+        context.restore()
 
 
     def render_captured(self):
@@ -949,9 +913,9 @@ class Board:
             for i in xrange(captured_count):
                 center = self.tbw((x, y))
                 if p == 2:
-                    img = self.stone1_captured
-                elif p == 1:
                     img = self.stone2_captured
+                elif p == 1:
+                    img = self.stone1_captured
                 self.center_blit(int(round(center[0])),
                                  int(round(center[1])),
                                  img)
@@ -1017,7 +981,10 @@ class Board:
                 op = 1
                 if p == 1:
                     op = 2
-                notifier.update(text="Player %i captured %i stones"%(op, capture_counts[p]))
+                t = "Player %i captured %i stone"%(op, capture_counts[p])
+                if capture_counts[p] > 1:
+                    t += "s"
+                notifier.update(text=t)
 
         #print "updated capture counts: "+str(self.capture_counts)
 
@@ -1453,7 +1420,11 @@ while running:
                     if board.current_player == 2:
                         board.pass_turn()
                     print ">>>>>> Starting dead group removal stage"
-                    notifier.update(text="Game over. Tap stones to remove dead groups. Tap other buttons to continue.", thresh=-1)
+                    t = "\n".join(["Game over. Tap stones to remove",
+                                   "dead groups. Tap other buttons",
+                                   "to continue to scoring phase."])
+                    notifier.update(text=t,
+                                    thresh=-1, size=18)
                     board.current_game_mode += 1
                     board.dead_removed_state = board.states[-1].copy()
                 else:
@@ -1467,7 +1438,8 @@ while running:
                         board.pass_turn()
             elif game_mode == "dead removal":
                 print ">>>>>> Starting territory assignment stage"
-                notifier.update(text="Game over. Tap territory to change assignment", thresh=-1)
+                notifier.update(text="Game over. Tap territory\nto change assignment",
+                                thresh=-1, size=24)
                 board.update_capture_counts()  # add removed dead groups to capture counts
                 board.assign_territory()
                 board.current_game_mode += 1
