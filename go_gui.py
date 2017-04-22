@@ -13,14 +13,14 @@ from latency_timer import LatencyTimer
 from cairo_context import get_cairo_context
 from notifier import Notifier
 
-
-#[x] - FIXME: captured stone colors may be misleading
-# TODO: less obtrusive pass buttons
-# TODO: better end-game interface
+# [x] - FIXME: captured stone colors may be misleading
+# [x] - TODO: less obtrusive pass buttons
+# [~] - TODO: better end-game interface
 # TODO: option to show mouse cursor
 # TODO: show a grid with a little star instead of a flat square for board size/reset button
 # TODO: add a separate button for changing board colors
 # TODO: add something to counteract the illusion of holes in the star points
+# TODO: implement board stretching for perspective
 # TODO: add SGF file generation, maybe loading and browsing
 # TODO: add external GO AI integration (gnugo, etc)
 
@@ -68,37 +68,34 @@ print str(info_object)
 # exit()
 
 full_res = (info_object.current_w, info_object.current_h)
-window_res = (int(round(full_res[0]*0.75)), int(round(full_res[1]*0.75)))
+window_res = (int(round(full_res[0] * 0.75)), int(round(full_res[1] * 0.75)))
 # window_res = (600,600)
-#window_res = (800, 400)
-#window_res = (1000, 600) # better usually
+# window_res = (800, 400)
+# window_res = (1000, 600) # better usually
 fullscreen = False
 current_res = window_res
-lw_factor = 0.005
+
+#lw_factor = 0.005
 # define line-width in relation to minimum display dimension
 # (should ultimately relate this to inches or cm)
 # Will need to rework to deal with multitouch zoom
-lw = 0
+#lw = 0
 
 
-def update_lw():
-    global lw
-    lw = max(1, int(lw_factor * min(current_res)))
+# def update_lw():
+#     global lw
+#     lw = max(1, int(lw_factor * min(current_res)))
+#
+#
+# update_lw()
 
-
-update_lw()
 screen = pygame.display.set_mode(window_res)
 
 mouse_down = False
 
-
 latency_timer = LatencyTimer()
 
-
-
-
 notifier = Notifier()
-
 
 colors = [
     # cyan and magenta
@@ -111,7 +108,7 @@ colors = [
 
 
 # TODO:
-# - render a dithered gradient for each game piece instead of flat circle
+# - render a dithered gradient
 # - multitouch pinch zoom   
 # - stone placement jitter?
 
@@ -146,7 +143,6 @@ def angle_diff(a, b):
 
 
 def color_gen():
-
     while True:
         hue1 = choice(list(np.arange(0, 1, 1.0 / 360.0)))
         # print "hue1: %f"%hue1
@@ -192,16 +188,7 @@ if False:
     moves = [((1, 2), 1)]
 
 
-def rounded_rect(w, h, r=10, color=(255, 255, 255)):
-    data = np.full(w * h * 4, 0, dtype=np.int8)
-    cairo_surface = cairo.ImageSurface.create_for_data(
-        data, cairo.FORMAT_ARGB32, w, h, w * 4)
-
-    context = cairo.Context(cairo_surface)
-
-    color = [v / 255.0 for v in color]
-    x = y = 0
-    "Draw a rounded rectangle"
+def rounded_rect_shape(context, x, y, r, h, w, color):
     #   A****BQ
     #  H      C
     #  *      *
@@ -225,8 +212,26 @@ def rounded_rect(w, h, r=10, color=(255, 255, 255)):
     context.curve_to(x, y + r / 2,
                      x + r / 2, y,
                      x + r, y)  # Curve to A
+    context.close_path()
     context.set_source_rgb(color[0], color[1], color[2])  # Solid color
     context.fill()
+
+
+def rounded_rect(w, h, lw, r=10, color=(255, 255, 255)):
+    data = np.full(w * h * 4, 0, dtype=np.int8)
+    cairo_surface = cairo.ImageSurface.create_for_data(
+        data, cairo.FORMAT_ARGB32, w, h, w * 4)
+
+    context = cairo.Context(cairo_surface)
+
+    color = [v / 255.0 for v in color]
+    dark = [v*0.5 for v in color]
+    x = y = 0
+
+    #o = w*0.02
+    o = int(lw)
+    rounded_rect_shape(context, x, y, r, h, w, color)
+    rounded_rect_shape(context, x+o, y+o, r, h-2*o, w-2*o, dark)
     return cairo_surface
 
 
@@ -272,7 +277,7 @@ class Board:
         self.stretch_factor = 1.5  # wide axis stretch factor (slight perspective correction)
         # TODO: account for this in transformations and in circle rendering
         self.base_grid_color = (127, 127, 254)
-        self.grid_brightness_factors = [x/10.0 for x in range(10)]
+        self.grid_brightness_factors = [x / 10.0 for x in range(10)]
         self.grid_brightness_index = 4
         self.set_grid_color()
         # TODO: make pairs of colors and rotate through for new games
@@ -286,8 +291,9 @@ class Board:
         self.player1_rect = ((0, 0), (0, 0))
         self.player2_rect = ((0, 0), (0, 0))
         self.newboard_rect = ((0, 0), (0, 0))
-        self.circle_lw_factor = 0.02  # fraction of cell width circle lw fills
+        self.circle_lw_factor = 0.005  # fraction of cell width circle lw fills
         self.circle_width_factor = 0.52  # fraction of cell width circle fills
+        self.button_lw_factor = 0.002
         self.territory_width_factor = 0.16
         self.grid_lw_factor = 0.002
         self.capture_counts = {1: [], 2: []}
@@ -309,7 +315,8 @@ class Board:
         self.territory = np.full(self.dims, 0, dtype=np.int)
         self.scores = {1: 0.0, 2: self.komi}  # add komi to second player's score
         self.final_scores = {1: 0.0, 2: 0.0}
-        self.button_down = 0  # 1 or 2 indicating mouse down on player pass button, 3 indicating board size button
+        self.button_down = 0  # 1 or 2 indicating mouse down on player pass button,
+                              # 3 indicating board size button, 4 board color
         self.undo_button_down = 0
 
         # self.states = initial_states.copy()
@@ -320,26 +327,24 @@ class Board:
         self.prerender_cairo()
         # self.init_cairo_surface()
 
-    def set_grid_color(self):
-        self.grid_color = ( int(self.base_grid_color[0]*self.grid_brightness_factors[self.grid_brightness_index]),
-                            int(self.base_grid_color[1]*self.grid_brightness_factors[self.grid_brightness_index]),
-                            int(self.base_grid_color[2]*self.grid_brightness_factors[self.grid_brightness_index]) )
-        print "Set grid color to (%i, %i, %i)"%(self.grid_color[0],
-                                                self.grid_color[1],
-                                                self.grid_color[2])
 
-    #def init_cairo_surface(self):
-    #    w, h = screen.get_size()
-    #    # Get a reference to the memory block storing the pixel data.
-    #    pixels = pygame.surfarray.pixels2d(screen)
-    #
-    #    # Set up a Cairo surface using the same memory block and the same pixel
-    #    # format (Cairo's RGB24 format means that the pixels are stored as
-    #    # 0x00rrggbb; i.e. only 24 bits are used and the upper 16 are 0).
-    #    self.cairo_surface = cairo.ImageSurface.create_for_data(
-    #        pixels.data, cairo.FORMAT_RGB24, w, h)
-    #
-    #    self.prerender_cairo()  # eventually delete the above, shouldn't be needed
+    def set_stone_colors(self, dark1, bright1, dark2, bright2):
+        self.player1_fillcolor = dark1
+        self.player1_tempfillcolor = bright1
+        self.player2_fillcolor = dark2
+        self.player2_tempfillcolor = bright2
+
+    def get_stone_colors(self):
+        return (self.player1_fillcolor, self.player1_tempfillcolor,
+                self.player2_fillcolor, self.player2_tempfillcolor)
+
+    def set_grid_color(self):
+        self.grid_color = (int(self.base_grid_color[0] * self.grid_brightness_factors[self.grid_brightness_index]),
+                           int(self.base_grid_color[1] * self.grid_brightness_factors[self.grid_brightness_index]),
+                           int(self.base_grid_color[2] * self.grid_brightness_factors[self.grid_brightness_index]))
+        print "Set grid color to (%i, %i, %i)" % (self.grid_color[0],
+                                                  self.grid_color[1],
+                                                  self.grid_color[2])
 
 
     def prerender_stone(self, color, radius, outline_width=0, use_gradient=True):
@@ -411,7 +416,9 @@ class Board:
                 color = self.player2_tempfillcolor
 
         print "about to prerender button with dims: %i,%i" % (w, h)
-        cairo_surface = rounded_rect(w, h, r=w / 15.0, color=color)
+        lw = max(1, int(self.button_lw_factor * min(current_res)))
+        print("lw: {}".format(lw))
+        cairo_surface = rounded_rect(w, h, lw, r=w / 15.0, color=color)
 
         w = cairo_surface.get_width()
         h = cairo_surface.get_height()
@@ -511,11 +518,14 @@ class Board:
         for p in [1, 2]:
             self.final_scores[p] = self.scores[p] + np.sum(self.territory == p) - sum(self.capture_counts[p])
             print "player %i score is %0.1f, %0.f territory - %0.f captured or passed + %0.1f komi" % (p,
-                                                                                                       self.final_scores[p],
-                                                                                                       np.sum(self.territory == p),
-                                                                                                       sum(self.capture_counts[p]),
+                                                                                                       self.final_scores[
+                                                                                                           p],
+                                                                                                       np.sum(
+                                                                                                           self.territory == p),
+                                                                                                       sum(
+                                                                                                           self.capture_counts[
+                                                                                                               p]),
                                                                                                        self.scores[p])
-
 
     # TODO: remove redundant code in forward and reverse transforms
     # TODO: implement zoom/move in following two transforms
@@ -618,25 +628,33 @@ class Board:
         y = coord[1]
         if ((self.current_player == 1) or (both is True)):
             if x > self.player1_rect[0][0] and \
-                y > self.player1_rect[0][1] and \
-                x < self.player1_rect[1][0] and \
-                y < self.player1_rect[1][1]:
+                            y > self.player1_rect[0][1] and \
+                            x < self.player1_rect[1][0] and \
+                            y < self.player1_rect[1][1]:
                 # print "button 1 pressed"
                 return 1
         if ((self.current_player == 2) or (both is True)):
             if x > self.player2_rect[0][0] and \
-                y > self.player2_rect[0][1] and \
-                x < self.player2_rect[1][0] and \
-                y < self.player2_rect[1][1]:
+                            y > self.player2_rect[0][1] and \
+                            x < self.player2_rect[1][0] and \
+                            y < self.player2_rect[1][1]:
                 # print "button 2 pressed"
                 return 2
 
         if x > self.newboard_rect[0][0] and \
-            y > self.newboard_rect[0][1] and \
-            x < self.newboard_rect[1][0] and \
-            y < self.newboard_rect[1][1]:
+                        y > self.newboard_rect[0][1] and \
+                        x < self.newboard_rect[1][0] and \
+                        y < self.newboard_rect[1][1]:
             # print "button 3 pressed"
             return 3
+
+        if x > self.newboard_rect[0][0] and \
+                        y > self.newcolor_rect[0][1] and \
+                        x < self.newcolor_rect[1][0] and \
+                        y < self.newcolor_rect[1][1]:
+            # print "button 4 pressed"
+            return 4
+
         return False
 
     def render_grid(self):
@@ -664,7 +682,6 @@ class Board:
                              int(round(center[1])),
                              self.grid_marker)
 
-
     def center_blit(self, x, y, surf):
         # blit a surface to the screen surface,
         # centering the surface horizontally and vertically
@@ -673,7 +690,6 @@ class Board:
         c1 = x - int(round(sw / 2.0))
         c2 = y - int(round(sh / 2.0))
         screen.blit(surf, (c1, c2))
-
 
     def blit_button(self, player=1, bright=False):
         if player == 1:
@@ -706,7 +722,6 @@ class Board:
                                      int(round(center[1])),
                                      img)
 
-
     def render_bright_stone(self, coords, player, scale=1.0):
         center = self.tbw(coords)
 
@@ -724,7 +739,6 @@ class Board:
                          int(round(center[1])),
                          img)
 
-
     def render_territory_marker(self, coords, player):
         center = self.tbw(coords)
 
@@ -735,7 +749,6 @@ class Board:
         self.center_blit(int(round(center[0])),
                          int(round(center[1])),
                          img)
-
 
     def render_last_stone_marker(self):
         if self.last_stone_coords[-1] is None:
@@ -752,7 +765,6 @@ class Board:
         self.center_blit(int(round(center[0])),
                          int(round(center[1])),
                          img)
-
 
     def render_temp_stone(self):
         # draw temp game piece before final play
@@ -785,6 +797,8 @@ class Board:
             LR2 = (h + (w - h) / 2.0 + (w - h) / 2.0 * 0.5, (1 - self.pad * 2) * h)
             UL3 = (self.pad * h, self.pad * h)
             LR3 = (self.pad * h * 1.5, self.pad * h * 1.5)
+            UL4 = (self.pad * h + w*0.05, self.pad * h)
+            LR4 = (self.pad * h * 1.5 + w*0.05, self.pad * h * 1.5)
         else:
             # portrait mode
             UL1 = (self.pad * w * 2, (h - w) / 2.0 * 0.5)
@@ -793,26 +807,33 @@ class Board:
             LR2 = ((1 - self.pad * 2) * w, w + (h - w) / 2.0 * 0.75 - self.pad * w)
             UL3 = (self.pad * h, self.pad * h)
             LR3 = (self.pad * h * 1.5, self.pad * h * 1.5)
+            UL4 = (self.pad * h, self.pad * h)
+            LR4 = (self.pad * h * 1.5, self.pad * h * 1.5)
         self.player1_rect = (UL1, LR1)
         self.player2_rect = (UL2, LR2)
         self.newboard_rect = (UL3, LR3)
+        self.newcolor_rect = (UL4, LR4)
         bright = False
         if self.button_down == 1:
-            #player1_color = self.player1_tempfillcolor
+            # player1_color = self.player1_tempfillcolor
             bright = True
         else:
             pass
-            #player1_color = self.player1_fillcolor
+            # player1_color = self.player1_fillcolor
         if self.button_down == 2:
-            #player2_color = self.player2_tempfillcolor
+            # player2_color = self.player2_tempfillcolor
             bright = True
         else:
             pass
-            #player2_color = self.player2_fillcolor
+            # player2_color = self.player2_fillcolor
         if self.button_down == 3:
             button3_color = (100, 100, 100)
         else:
             button3_color = (50, 50, 50)
+        if self.button_down == 4:
+            button4_color = (100, 100, 100)
+        else:
+            button4_color = (50, 50, 50)
 
         # print "about to blit button(s)"
         if (self.current_player == 1) or (both == True):
@@ -825,6 +846,11 @@ class Board:
                          (self.newboard_rect[0][0], self.newboard_rect[0][1],
                           self.newboard_rect[1][0] - self.newboard_rect[0][0],
                           self.newboard_rect[1][1] - self.newboard_rect[0][1]))
+
+        pygame.draw.rect(screen, button4_color,
+                         (self.newcolor_rect[0][0], self.newcolor_rect[0][1],
+                          self.newcolor_rect[1][0] - self.newcolor_rect[0][0],
+                          self.newcolor_rect[1][1] - self.newcolor_rect[0][1]))
 
     def render_temp_group(self):
         if self.temp_coords == None:
@@ -851,7 +877,7 @@ class Board:
         score1 = "%0.1f" % self.final_scores[1]
         score2 = "%0.1f" % self.final_scores[2]
 
-        context, h,w = get_cairo_context()
+        context, h, w = get_cairo_context()
 
         # if w > h:
         #     # landscape mode
@@ -864,51 +890,50 @@ class Board:
 
         context.select_font_face("Ubuntu", cairo.FONT_SLANT_NORMAL,
                                  cairo.FONT_WEIGHT_BOLD)
-        font_height_scale=0.08
+        font_height_scale = 0.08
 
-        context.set_font_size(h*font_height_scale)
+        context.set_font_size(h * font_height_scale)
 
-        context.translate(w/2,h/2)
+        context.translate(w / 2, h / 2)
 
         context.save()
-        context.translate(0,0)
-        context.rotate(np.pi*0.5)
+        context.translate(0, 0)
+        context.rotate(np.pi * 0.5)
 
         (x, y, width, height, dx, dy) = context.text_extents(score1)
-        context.move_to(-width/2, h*0.70-height/2)
+        context.move_to(-width / 2, h * 0.70 - height / 2)
         context.set_source_rgb(*self.player1_fillcolor)
         context.show_text(score1)
 
         context.restore()
 
         context.save()
-        context.translate(0,0)
-        context.rotate(np.pi*1.5)
+        context.translate(0, 0)
+        context.rotate(np.pi * 1.5)
 
         (x, y, width, height, dx, dy) = context.text_extents(score2)
 
         context.set_source_rgb(*self.player2_fillcolor)
-        context.move_to(-width/2, h*0.70-height/2)
+        context.move_to(-width / 2, h * 0.70 - height / 2)
         context.show_text(score2)
         context.restore()
 
-
     def render_captured(self):
         # TODO: group into tens for easier midgame counting, maybe also show number
-        #print "rendering captured stones"
+        # print "rendering captured stones"
         for p in [1, 2]:
             if len(self.capture_counts[p]) > 0:
                 captured_count = sum(self.capture_counts[p])
             else:
                 captured_count = 0
-            #print "player %i capture count: %i"%(p, captured_count)
+            # print "player %i capture count: %i"%(p, captured_count)
 
             if p == 2:
                 x = -1
-                d = -1/5.0
+                d = -1 / 5.0
             else:
                 x = board.dims[0]
-                d = 1/5.0
+                d = 1 / 5.0
             y = 0
             for i in xrange(captured_count):
                 center = self.tbw((x, y))
@@ -919,11 +944,10 @@ class Board:
                 self.center_blit(int(round(center[0])),
                                  int(round(center[1])),
                                  img)
-                y += 1/5.0
+                y += 1 / 5.0
                 if y >= self.dims[1]:
                     x += d
                     y = 0
-
 
     def render(self):
         game_mode = board.game_modes[board.current_game_mode]
@@ -963,17 +987,17 @@ class Board:
 
     def update_capture_counts(self):
         game_mode = self.game_modes[self.current_game_mode]
-        #print "Updating capture counts in game mode %s"%game_mode
+        # print "Updating capture counts in game mode %s"%game_mode
         if game_mode == "play":
             state1 = self.states[-2]
             state2 = self.states[-1]
         else:
             state1 = self.states[-1]
             state2 = self.dead_removed_state
-        #print "state1:"
-        #self.print_state(state1)
-        #print "state2:"
-        #self.print_state(state2)
+        # print "state1:"
+        # self.print_state(state1)
+        # print "state2:"
+        # self.print_state(state2)
         capture_counts = self.calc_capture_counts(state1, state2)
         for p in [1, 2]:
             self.capture_counts[p].append(capture_counts[p])
@@ -981,12 +1005,12 @@ class Board:
                 op = 1
                 if p == 1:
                     op = 2
-                t = "Player %i captured %i stone"%(op, capture_counts[p])
+                t = "Player %i captured %i stone" % (op, capture_counts[p])
                 if capture_counts[p] > 1:
                     t += "s"
                 notifier.update(text=t)
 
-        #print "updated capture counts: "+str(self.capture_counts)
+                # print "updated capture counts: "+str(self.capture_counts)
 
     def update_temp_coords(self, coord, do_action=False):
         # given a location in window coordinates (pixels)
@@ -1088,7 +1112,7 @@ class Board:
             return
         # exclude out-of-bounds locations
         if not (int_x >= 0 and int_x < self.dims[0] and
-                int_y >= 0 and int_y < self.dims[1]):
+                        int_y >= 0 and int_y < self.dims[1]):
             self.temp_coords = None
             return
         # check if the last stone was clicked
@@ -1362,7 +1386,7 @@ while running:
                 fullscreen = True
                 pygame.display.set_mode(full_res)
                 current_res = full_res
-                update_lw()
+                #update_lw()
                 # print "lw is %f"%lw
                 pygame.display.toggle_fullscreen()
                 board.prerender_cairo()
@@ -1372,7 +1396,7 @@ while running:
                 pygame.display.toggle_fullscreen()
                 pygame.display.set_mode(window_res)
                 current_res = window_res
-                update_lw()
+                #update_lw()
                 # board.init_cairo_surface()
                 board.prerender_cairo()
                 # print "lw is %f"%lw
@@ -1386,9 +1410,9 @@ while running:
             board.prerender_cairo()
     # For undo, require a mouse down on the last played location, and
     # a mouse up on the same location
-    elif ( event.type == pygame.MOUSEBUTTONDOWN
-           and event.button == LEFT
-           and latency_timer.check() ):
+    elif (event.type == pygame.MOUSEBUTTONDOWN
+          and event.button == LEFT
+          and latency_timer.check()):
         need_render = True
         mouse_down = True
         x, y = event.pos
@@ -1400,10 +1424,10 @@ while running:
             board.update_temp_coords((x, y))
             board.check_undo((x, y), action="down")
             # print "mouse down at "+str(event.pos)
-    elif ( event.type == pygame.MOUSEBUTTONUP
-            and event.button == LEFT
-            and latency_timer.check()
-            and mouse_down == True ):
+    elif (event.type == pygame.MOUSEBUTTONUP
+          and event.button == LEFT
+          and latency_timer.check()
+          and mouse_down == True):
         need_render = True
         mouse_down = False
         x, y = event.pos
@@ -1432,9 +1456,13 @@ while running:
                         dims_index += 1
                         if dims_index > len(dims) - 1:
                             dims_index = dims_index - len(dims)
-                        board = Board(next(color_gen()), dims[dims_index])
+                        #board = Board(next(color_gen()), dims[dims_index])
+                        board = Board(board.get_stone_colors(), dims[dims_index])
+                    elif board.button_down == 4:
+                        board.set_stone_colors(*next(color_gen()))
+                        board.prerender_cairo()
                     else:
-                        notifier.update(text="Player %i passed"%board.current_player)
+                        notifier.update(text="Player %i passed" % board.current_player)
                         board.pass_turn()
             elif game_mode == "dead removal":
                 print ">>>>>> Starting territory assignment stage"
@@ -1454,16 +1482,16 @@ while running:
             board.update_temp_coords((x, y), do_action=True)
             board.check_undo((x, y), action="up")
             # print "placed piece"
-            #notifier.update(text="Placed piece for player %i"%(board.current_player))
+            # notifier.update(text="Placed piece for player %i"%(board.current_player))
 
         board.button_down = 0
         # print "mouse up at "+str(event.pos)
 
         latency_timer.reset()
 
-    elif ( event.type == pygame.MOUSEMOTION
-           and mouse_down == True
-           and latency_timer.check() ):
+    elif (event.type == pygame.MOUSEMOTION
+          and mouse_down == True
+          and latency_timer.check()):
         need_render = True
         x, y = event.pos
         v = board.test_pass((x, y), both=both)
